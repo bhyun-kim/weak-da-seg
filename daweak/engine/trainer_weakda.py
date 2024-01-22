@@ -98,10 +98,11 @@ class TrainerWeakda(Trainer):
             _, pred2, _, feat2 = self.model(images, get_features=True)
 
             if self.args.use_weak_cw:
-                p_feat2 = get_pooled_feat(pred2.detach(), feat2.detach())
+                _pred2 = F.interpolate(pred2, size=feat2.shape[2:], mode='bilinear', align_corners=True)
+                p_feat2 = get_pooled_feat(_pred2.detach(), feat2.detach())
 
             # pred1 = self.interp_source(pred1)
-            # pred2 = self.interp_source(pred2)
+            pred2 = self.interp_source(pred2)
 
             # segmentation loss
             loss_seg1 = 0  # self.seg_loss(pred1, labels)

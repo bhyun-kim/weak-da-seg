@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # model
-model="deeplab"
+model="deeplab_v3"
 
 # dataset
 source="gta5"
@@ -9,12 +9,12 @@ target="cityscapes"
 
 if [ "$source" = "gta5" ]
 then
-    source_path="datasets/gta5"
+    source_path="D:/UOS-SSaS Dropbox/05. Data/00. Benchmarks/06. GTA5"
 fi
 
 if [ "$target" = "cityscapes" ]
 then
-    target_path="datasets/cityscapes"
+    target_path="D:/UOS-SSaS Dropbox/05. Data/00. Benchmarks/01. cityscapes"
 fi
 
 if [ "$source" = "gta5" ]
@@ -24,7 +24,7 @@ fi
 
 if [ "$target" = "cityscapes" ]
 then
-    target_size='1024,512'
+    target_size="1024,512"
 fi
 
 if [ "$source" = "gta5" ]

@@ -34,7 +34,7 @@ class CityscapesSegmentation(data.Dataset):
         # label mapping
         with open(osp.join(self.data_root, '%s_list/info.json' % self.dataset), 'r') as fp:
             info = json.load(fp)
-        self.mapping = np.array(info['label2train'], dtype=np.int)
+        self.mapping = np.array(info['label2train'], dtype=int)
 
         # load image list
         list_path = osp.join(self.data_root, '%s_list/%s.txt' % (self.dataset, self.split))
