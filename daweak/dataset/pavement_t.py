@@ -12,7 +12,7 @@ import random  #################
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-class ConcreteTSegmentation(data.Dataset):
+class PavementTSegmentation(data.Dataset):
     def __init__(
             self,
             dataset=None,
@@ -31,7 +31,7 @@ class ConcreteTSegmentation(data.Dataset):
         self.data_root = data_root
         self.size = size
         self.ignore_label = 255
-        self.mean = np.array((147.83209, 153.94427, 157.89119), dtype=np.float32)
+        self.mean = np.array((124.43376, 123.961784, 123.35871), dtype=np.float32)
         self.use_points = use_points
 
         # label mapping
@@ -51,7 +51,7 @@ class ConcreteTSegmentation(data.Dataset):
                     self.path, "gtFine/%s/%s_gtFine_labelIds.png" % (self.split, label_line[:-16])
                 )
                 label = Image.open(name).resize(self.size, Image.NEAREST)
-                label = np.array(label).astype(np.uint8)
+                label = np.array(label).astype('float32')
                 label = self.label_mapping(label, self.mapping)
                 choose_idx = []
                 set_label = set(label.reshape(-1)) - {255}
@@ -96,13 +96,13 @@ class ConcreteTSegmentation(data.Dataset):
         label = label.resize(self.size, Image.NEAREST)
 
         image = np.asarray(image, np.float32)
-        label = np.asarray(label, np.uint8)
+        label = np.asarray(label, np.float32)
 
         # label mapping
         if self.mode == 'val':
             label = self.label_mapping(label, self.mapping)
 
-        ###################################################################################################################################
+        #####################################################################################################################################
         flip_type = 'none'
         if self.split == 'train':
             # Random horizontal flip
@@ -118,8 +118,9 @@ class ConcreteTSegmentation(data.Dataset):
                 if flip_type == 'none':
                     flip_type = 'vertical'
                 elif flip_type == 'horizontal':
-                    flip_type = 'ho_ver'           
+                    flip_type = 'ho_ver'
 
+        # print(name, flip_type)
         point_label_list = []
         if self.use_points:
             point_label_list = self.point_labels[index]
@@ -134,7 +135,7 @@ class ConcreteTSegmentation(data.Dataset):
                         p[0] = self.size[0] - 1 - p[0]
 
             tmp_label = Image.fromarray(label.astype('uint8')).resize(self.size, Image.NEAREST)
-            tmp_label = np.asarray(tmp_label, np.uint8)
+            tmp_label = np.asarray(tmp_label, np.float32)
             categories = []
             # print('point_label_list_2: ', point_label_list)
             for i, p in enumerate(point_label_list):
@@ -151,7 +152,7 @@ class ConcreteTSegmentation(data.Dataset):
         dilated_label = cv2.dilate(label_for_dilation, kernel, iterations=1)
         # convert dilated_label back to float32
         dilated_label = dilated_label.astype(np.float32)
-        ##############################################################################################################################
+        #####################################################################################################################################    
 
         size = image.shape
         image = image[:, :, ::-1]  # change to BGR

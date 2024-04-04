@@ -11,7 +11,7 @@ import random  #################
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-class ConcreteSSegmentation(data.Dataset):
+class PavementSSegmentation(data.Dataset):
     def __init__(
             self,
             dataset=None,
@@ -30,7 +30,7 @@ class ConcreteSSegmentation(data.Dataset):
         self.data_root = data_root
         self.size = size
         self.ignore_label = 255
-        self.mean = np.array((147.83209, 153.94427, 157.89119), dtype=np.float32)
+        self.mean = np.array((124.43376, 123.961784, 123.35871), dtype=np.float32)
         self.use_pixeladapt = use_pixeladapt
 
         # load image list
@@ -71,17 +71,17 @@ class ConcreteSSegmentation(data.Dataset):
 
         # resize
         image = image.resize(self.size, Image.BICUBIC)
-        label = label.resize(self.size, Image.NEAREST)      
+        label = label.resize(self.size, Image.NEAREST)
 
         image = np.asarray(image, np.float32)
-        label = np.asarray(label, np.uint8)
+        label = np.asarray(label, np.float32)
 
         # re-assign labels to match the format of Cityscapes
-        label_copy = 255 * np.ones(label.shape, dtype=np.uint8)
+        label_copy = 255 * np.ones(label.shape, dtype=np.float32)
         for k, v in self.id_to_trainid.items():
             label_copy[label == k] = v
 
-        ####################################################################
+        ############################################
         flip_type = 'none'
         # Random horizontal flip
         if random.random() > 0.5:
@@ -106,7 +106,7 @@ class ConcreteSSegmentation(data.Dataset):
         dilated_label = cv2.dilate(label_for_dilation, kernel, iterations=1)
         # convert dilated_label back to float32
         dilated_label = dilated_label.astype(np.float32)
-        ####################################################################
+        ############################################
 
         size = image.shape
         image = image[:, :, ::-1]  # change to BGR
