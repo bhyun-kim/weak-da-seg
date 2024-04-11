@@ -8,7 +8,8 @@ import torch.nn.functional as F
 
 from .trainer_base_new import Trainer, get_weak_labels, get_pooled_feat, get_psuedo_weak_labels
 
-dropout = nn.Dropout(0.3)  # 0.1 for oracle and 0.3 for pseudo
+dropout = nn.Dropout(0.1)  # 0.1 for oracle and 0.3 for pseudo
+print('dropout: ', dropout)
 
 class TrainerWeakda(Trainer):
 
@@ -68,7 +69,7 @@ class TrainerWeakda(Trainer):
             _, pred2, _, feat2 = self.model(images, get_features=True)
 
             if self.args.use_weak_cw:
-                _pred2 = F.interpolate(pred2, size=feat2.shape[2:], mode='bilinear', align_corners=True)
+                _pred2 = F.interpolate(pred2, size=feat2.shape[2:], mode='bicubic', align_corners=True)
                 p_feat2 = get_pooled_feat(_pred2.detach(), feat2.detach())
 
             # pred1 = self.interp_source(pred1)
@@ -117,7 +118,7 @@ class TrainerWeakda(Trainer):
 
                 d_pred_target2 = dropout(pred_target2)
                 if self.args.use_weak_cw:
-                    _p_feat_target2 = F.interpolate(pred_target2, size=feat_target2.shape[2:], mode='bilinear', align_corners=True)  ###
+                    _p_feat_target2 = F.interpolate(pred_target2, size=feat_target2.shape[2:], mode='bicubic', align_corners=True)  ###
                     p_feat_target2 = get_pooled_feat(_p_feat_target2.detach(), feat_target2)
                     wD_out2 = self.model_wD(p_feat_target2)
 
@@ -269,19 +270,19 @@ class TrainerWeakda(Trainer):
             # test during training
             if self.args.val:
                 if (i_iter % self.args.save_pred_every == 0 and i_iter != 0) \
-                   and i_iter < self.args.num_steps - 1:  ###
+                   and i_iter < self.args.num_steps:  ###
                     self.validation(i_iter)
-                    self.is_min = True
+                    self.is_less = True
 
-                    if self.is_min:
+                    if self.is_less:
                         print(
-                            'Current minimum loss at iter %d: %f' %
-                            (self.min_iter, self.min_loss)
+                            'Current loss at iter %d: %f' %
+                            (i_iter, self.last_loss)
                         )
                         if self.logger_fid:
                             print(
-                                'Current minimum loss at iter %d: %f' %
-                                (self.min_iter, self.min_loss),
+                                'Current loss at iter %d: %f' %
+                                (i_iter, self.last_loss),
                                 file=self.logger_fid,
                             )
 
@@ -291,7 +292,7 @@ class TrainerWeakda(Trainer):
                     
                     self.model.train()
 
-            if i_iter >= self.args.num_steps - 1:  ###
+            if i_iter >= self.args.num_steps:  ###
                 print(f"Stop training at {self.args.num_steps} ('num-steps') iters")  ###
                 if self.logger_fid:
                     print(

@@ -32,18 +32,18 @@ class Options:
                             help="Comma-separated string with height and width of target images.")
         parser.add_argument("--num-classes", type=int, default=19,
                             help="Number of classes to predict (including background).")
-        parser.add_argument('--source-split', type=str, default='train',
-                            help='dataset train split for source (default: train)')
-        parser.add_argument('--target-split', type=str, default='val',
-                            help='dataset train split for target (default: train)')
-        parser.add_argument('--test-split', type=str, default='val',
-                            help='dataset validation split for target (default: val)')
-        # parser.add_argument('--train-split', type=str, default='train',
-        #                     help='dataset train split (default: train)')
-        # parser.add_argument('--val-split', type=str, default='val',
-        #                     help='dataset val split (default: train)')
-        # parser.add_argument('--test-split', type=str, default='test',
-        #                     help='dataset validation split for target (default: val)')   
+        # parser.add_argument('--source-split', type=str, default='train',
+        #                     help='dataset train split for source (default: train)')
+        # parser.add_argument('--target-split', type=str, default='val',
+        #                     help='dataset train split for target (default: train)')
+        # parser.add_argument('--test-split', type=str, default='val',
+        #                     help='dataset validation split for target (default: val)')
+        parser.add_argument('--train-split', type=str, default='train',
+                            help='dataset train split (default: train)')
+        parser.add_argument('--val-split', type=str, default='val',
+                            help='dataset val split (default: train)')
+        parser.add_argument('--test-split', type=str, default='test',
+                            help='dataset validation split for target (default: val)')   
         # training hyper params
         parser.add_argument("--batch-size", type=int, default=1,
                             help="Number of images sent to the network in one step.")

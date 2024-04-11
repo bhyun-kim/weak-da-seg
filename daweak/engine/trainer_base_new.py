@@ -12,15 +12,50 @@ from torch.utils import data
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 from PIL import Image
+import cv2
 
 from daweak.dataset import get_dataset
 from daweak.model import get_segmentation_model, get_discriminator_model
 import daweak.util as util
 
 from itertools import cycle
+from torch.utils.data.dataloader import default_collate
 
 PER_TH = 0.1
-dropout = nn.Dropout(0.3)  # 0.1 for oracle and 0.3 for pseudo
+dropout = nn.Dropout(0.1)  # 0.1 for oracle and 0.3 for pseudo
+
+
+class CombinedLoss(torch.nn.Module):
+    def __init__(self, ignore_index=255, dice_weight=0.5):
+        super(CombinedLoss, self).__init__()
+        self.cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)
+        self.dice_weight = dice_weight  # Weight for the Dice loss in the combined loss function
+
+    def forward(self, inputs, targets):
+        # Cross-Entropy Loss
+        ce_loss = self.cross_entropy_loss(inputs, targets)
+
+        # Dice Loss
+        smooth = 1.0  # Smoothing factor to avoid division by zero
+        inputs_softmax = F.softmax(inputs, dim=1)
+        targets_one_hot = F.one_hot(targets, num_classes=inputs_softmax.shape[1]).permute(0, 3, 1, 2).float()
+
+        # Ignore index handling
+        if self.cross_entropy_loss.ignore_index is not None:
+            ignore_mask = targets != self.cross_entropy_loss.ignore_index
+            inputs_softmax = inputs_softmax * ignore_mask.unsqueeze(1)
+            targets_one_hot = targets_one_hot * ignore_mask.unsqueeze(1)
+
+        intersection = (inputs_softmax * targets_one_hot).sum(dim=(2, 3))
+        union = inputs_softmax.sum(dim=(2, 3)) + targets_one_hot.sum(dim=(2, 3))
+
+        dice_loss = 1 - (2. * intersection + smooth) / (union + smooth)
+        dice_loss = dice_loss.mean()
+
+        # Combined Loss
+        combined_loss = (1 - self.dice_weight) * ce_loss + self.dice_weight * dice_loss
+        return combined_loss
+
 
 # global pooling
 def get_prediction(preds):
@@ -78,14 +113,7 @@ def get_psuedo_weak_labels(preds, th):
 palette = [
     0, 0, 0, 255, 0, 0
 ]
-# palette = [
-#     0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 255, 255, 255, 0, 255
-# ]
-# palette = [
-#     128, 64, 128, 244, 35, 232, 70, 70, 70, 102, 102, 156, 190, 153, 153, 153, 153, 153, 250, 170,
-#     30, 220, 220, 0, 107, 142, 35, 152, 251, 152, 70, 130, 180, 220, 20, 60, 255, 0, 0, 0, 0, 142,
-#     0, 0, 70, 0, 60, 100, 0, 80, 100, 0, 0, 230, 119, 11, 32
-# ]
+
 zero_pad = 256 * 3 - len(palette)
 for i in range(zero_pad):
     palette.append(0)
@@ -155,10 +183,10 @@ class Trainer:
                                                       drop_last=True, shuffle=True, **kwargs)
             self.trainloader_target = data.DataLoader(trainset_target, batch_size=args.batch_size,
                                                       drop_last=True, shuffle=True, **kwargs)
-            self.valloader_source = data.DataLoader(valset_source, batch_size=args.batch_size,
-                                                        drop_last=True, shuffle=True, **kwargs)
-            self.valloader_target = data.DataLoader(valset_target, batch_size=args.batch_size,
-                                                        drop_last=True, shuffle=True, **kwargs)
+            self.valloader_source = data.DataLoader(valset_source, batch_size=16,
+                                                        drop_last=True, shuffle=False, **kwargs)
+            self.valloader_target = data.DataLoader(valset_target, batch_size=16,
+                                                        drop_last=True, shuffle=False, **kwargs)
         self.testloader = data.DataLoader(testset, batch_size=1, drop_last=False,
                                           shuffle=False, **kwargs)
 
@@ -167,7 +195,7 @@ class Trainer:
         else:
             self.device = torch.device('cpu')
         device_ids = list(range(torch.cuda.device_count()))
-        # segmentation model
+        # segmentation models
         model = get_segmentation_model(
             args.model, num_classes=args.num_classes, pre_train=args.restore_from
         )
@@ -203,15 +231,15 @@ class Trainer:
 
         # criterions
         self.bce_loss = torch.nn.BCEWithLogitsLoss()
-        self.seg_loss = torch.nn.CrossEntropyLoss(ignore_index=255)
+        self.seg_loss = CombinedLoss()
 
         self.interp_source = nn.Upsample(
-            size=(input_size_source[1], input_size_source[0]), mode='bilinear', align_corners=True)
+            size=(input_size_source[1], input_size_source[0]), mode='bicubic', align_corners=True)
         self.interp_target = nn.Upsample(
-            size=(input_size_target[1], input_size_target[0]), mode='bilinear', align_corners=True)
+            size=(input_size_target[1], input_size_target[0]), mode='bicubic', align_corners=True)
         self.interp_target_eval = nn.Upsample(
             size=(input_size_target[1]*2, input_size_target[0]*2),
-            mode='bilinear',
+            mode='bicubic',
             align_corners=True
         )
 
@@ -231,12 +259,9 @@ class Trainer:
 
         self.source_label = 0
         self.target_label = 1
-        # self.best_pred = 0.0
-        # self.best_iter = 0
-        # self.is_best = False
-        self.min_loss = 100000.0
-        self.min_iter = 0
-        self.is_min = False
+
+        # early stop
+        self.last_loss = None
         self.patience_count = 0
 
     def __del__(self):
@@ -304,146 +329,153 @@ class Trainer:
             print("Validating...", file=self.logger_fid)
 
         self.model.eval()
-        loss_val = 0.0
+        total_loss_val = 0.0
+        total_batches = 0
         eps = 1e-7
 
         with torch.no_grad():
             num_source_batches = len(self.valloader_source)
             num_target_batches = len(self.valloader_target)
+            # print('num_source_batches: ', num_source_batches, 'num_target_batches: ', num_target_batches)
             max_batches = max(num_source_batches, num_target_batches)
 
-            iter_source = cycle(self.valloader_source) if num_source_batches < max_batches else iter(self.valloader_source)
-            iter_target = cycle(self.valloader_target) if num_target_batches < max_batches else iter(self.valloader_target)
+            for source_batch, target_batch in zip(cycle(self.valloader_source) if num_source_batches < max_batches else self.valloader_source,
+                                              cycle(self.valloader_target) if num_target_batches < max_batches else self.valloader_target):
                 
-            source_images, source_labels, _, source_name = next(iter_source)
-            source_images = source_images.to(self.device)
-            source_labels = source_labels.long().to(self.device)
+                source_images, source_labels, _, source_name = source_batch
+                # print('val source images: ', source_name[0])
+                source_images = source_images.to(self.device)
+                source_labels = source_labels.long().to(self.device)
 
-            target_images, labels_target, _, target_name, point_label_list = next(iter_target)
-            target_images = target_images.to(self.device)
+                target_images, labels_target, _, target_name, point_label_list = target_batch
+                target_images = target_images.to(self.device)
 
-            # process source validation data
-            _, pred2, _, feat2 = self.model(source_images, get_features=True)
+                # process source validation data
+                _, pred2, _, feat2 = self.model(source_images, get_features=True)
 
-            if self.args.use_weak_cw:
-                _pred2 = F.interpolate(pred2, size=feat2.shape[2:], mode="bilinear", align_corners=True)
-                p_feat2 = get_pooled_feat(_pred2.detach(), feat2.detach())
-
-            pred2 = self.interp_source(pred2)
-            loss_seg2 = self.seg_loss(pred2, source_labels)
-            loss_val += loss_seg2.item()  # 1
-
-            # process target validation data if not source_only
-            if not self.args.source_only:
-                _, pred_target2, _, feat_target2 = self.model(target_images, get_features=True)
-
-                weak_labels_onehot = None
-                if self.args.use_pseudo:
-                    weak_labels_onehot = get_psuedo_weak_labels(
-                        pred_target2.detach(), self.args.pweak_th)
-                else:
-                    weak_labels_onehot = get_weak_labels(
-                        labels_target, pred_target2.shape[1], self.target_th)
-                weak_labels_onehot = weak_labels_onehot.to(self.device)
-
-                if self.args.use_pointloss:
-                    point_label_list = point_label_list.long().to(self.device)
-                    loss_point = []
-                    tmp_interp = self.interp_target(pred_target2)
-                    for p in point_label_list[0]:
-                        if not weak_labels_onehot[0][p[2]]:
-                            continue
-                        tmp = torch.softmax(tmp_interp[0, :, p[0], p[1]], dim=0)
-                        loss_point.append(-torch.log(tmp + eps)[p[2]])
-                    loss_point = torch.mean(torch.stack(loss_point))
-                    loss_val += loss_point.item()  # 2    
-                else:
-                    loss_point = torch.tensor(0.)
-
-                d_pred_target2 = dropout(pred_target2)
                 if self.args.use_weak_cw:
-                    _p_feat_target2 = F.interpolate(pred_target2, size=feat_target2.shape[2:], mode='bilinear', align_corners=True)  ###
-                    p_feat_target2 = get_pooled_feat(_p_feat_target2.detach(), feat_target2)
-                    wD_out2 = self.model_wD(p_feat_target2)
+                    _pred2 = F.interpolate(pred2, size=feat2.shape[2:], mode="bicubic", align_corners=True)
+                    p_feat2 = get_pooled_feat(_pred2.detach(), feat2.detach())
 
-                loss_weak_target2 = 0.0
-                if self.args.use_weak:
-                    d_labels_target = labels_target.unsqueeze(1)
-                    loss_weak_target2 = self.get_weak_loss(
-                        d_pred_target2, d_labels_target, self.device, weak_labels_onehot)
-                    loss_val += self.args.lambda_weak_target2 * loss_weak_target2.item()  # 3
+                pred2 = self.interp_source(pred2)
+                loss_seg2 = self.seg_loss(pred2, source_labels)
+                total_loss_val += loss_seg2.item()  # 1
 
-                pred_target2 = self.interp_target(pred_target2)
+                # process target validation data if not source_only
+                if not self.args.source_only:
+                    _, pred_target2, _, feat_target2 = self.model(target_images, get_features=True)
 
-                loss_weak_cwadv2 = 0.0
-                if self.args.use_weak_cw:
-                    loss_weak_cwadv2 = self.get_adv_loss(
-                        wD_out2, d_labels_target, self.source_label, 'target', weak_labels_onehot)
-                    loss_val += self.args.lambda_weak_cwadv2 * loss_weak_cwadv2.item()  # 4
-                D_out2 = self.model_D2(F.softmax(pred_target2, dim=1))
+                    weak_labels_onehot = None
+                    if self.args.use_pseudo:
+                        weak_labels_onehot = get_psuedo_weak_labels(
+                            pred_target2.detach(), self.args.pweak_th)
+                    else:
+                        weak_labels_onehot = get_weak_labels(
+                            labels_target, pred_target2.shape[1], self.target_th)
+                    weak_labels_onehot = weak_labels_onehot.to(self.device)
 
-                if self.args.ls_gan:
-                    D_out2 = torch.clamp(torch.sigmoid(D_out2), eps, 1-eps)
-                    loss_adv_target1 = 0.  # 0.5*torch.mean((D_out1 - torch.tensor(1.))**2)
-                    loss_adv_target2 = 0.5*torch.mean((D_out2 - torch.tensor(1.))**2)
-                else:
-                    loss_adv_target1 = 0.  # self.bce_loss(D_out1, torch.FloatTensor(D_out1.data.size()).fill_(self.source_label).to(self.device))  # noqa: E501
-                    loss_adv_target2 = self.bce_loss(
-                        D_out2,
-                        torch.FloatTensor(D_out2.data.size()).fill_(
-                            self.source_label).to(self.device)
-                    )                   
+                    if self.args.use_pointloss:
+                        point_label_list = point_label_list.long().to(self.device)
+                        loss_point = []
+                        tmp_interp = self.interp_target(pred_target2)
+                        for p in point_label_list[0]:
+                            if not weak_labels_onehot[0][p[2]]:
+                                continue
+                            tmp = torch.softmax(tmp_interp[0, :, p[0], p[1]], dim=0)
+                            loss_point.append(-torch.log(tmp + eps)[p[2]])
+                        loss_point = torch.mean(torch.stack(loss_point))
+                        total_loss_val += loss_point.item()  # 2    
+                    else:
+                        loss_point = torch.tensor(0.)
 
-                loss_val += self.args.lambda_adv_target2 * loss_adv_target2.item()  # 5
+                    d_pred_target2 = dropout(pred_target2)
+                    if self.args.use_weak_cw:
+                        _p_feat_target2 = F.interpolate(pred_target2, size=feat_target2.shape[2:], mode='bicubic', align_corners=True)  ###
+                        p_feat_target2 = get_pooled_feat(_p_feat_target2.detach(), feat_target2)
+                        wD_out2 = self.model_wD(p_feat_target2)
 
-        loss_txt = ('iter = {0:8d}/{1:8d}, val_loss = {2:.3f}'.format(i_iter, self.args.num_steps, loss_val))
+                    loss_weak_target2 = 0.0
+                    if self.args.use_weak:
+                        d_labels_target = labels_target.unsqueeze(1)
+                        loss_weak_target2 = self.get_weak_loss(
+                            d_pred_target2, d_labels_target, self.device, weak_labels_onehot)
+                        total_loss_val += self.args.lambda_weak_target2 * loss_weak_target2.item()  # 3
+
+                    pred_target2 = self.interp_target(pred_target2)
+
+                    loss_weak_cwadv2 = 0.0
+                    if self.args.use_weak_cw:
+                        loss_weak_cwadv2 = self.get_adv_loss(
+                            wD_out2, d_labels_target, self.source_label, 'target', weak_labels_onehot)
+                        total_loss_val += self.args.lambda_weak_cwadv2 * loss_weak_cwadv2.item()  # 4
+                    D_out2 = self.model_D2(F.softmax(pred_target2, dim=1))
+
+                    if self.args.ls_gan:
+                        D_out2 = torch.clamp(torch.sigmoid(D_out2), eps, 1-eps)
+                        loss_adv_target1 = 0.  # 0.5*torch.mean((D_out1 - torch.tensor(1.))**2)
+                        loss_adv_target2 = 0.5*torch.mean((D_out2 - torch.tensor(1.))**2)
+                    else:
+                        loss_adv_target1 = 0.  # self.bce_loss(D_out1, torch.FloatTensor(D_out1.data.size()).fill_(self.source_label).to(self.device))  # noqa: E501
+                        loss_adv_target2 = self.bce_loss(
+                            D_out2,
+                            torch.FloatTensor(D_out2.data.size()).fill_(
+                                self.source_label).to(self.device)
+                        )                   
+
+                    total_loss_val += self.args.lambda_adv_target2 * loss_adv_target2.item()  # 5
+
+                total_batches += 1
+
+            avg_loss_val = total_loss_val / total_batches    
+
+        loss_txt = ('iter = {0:8d}/{1:8d}, val_loss = {2:.3f}'.format(i_iter, self.args.num_steps, avg_loss_val))
         print(loss_txt)
         if self.logger_fid:
             print(loss_txt, file=self.logger_fid, flush=True)
 
-        # save the current best model (min loss model)
-        new_loss = loss_val
+        new_loss = avg_loss_val
 
-        if new_loss < self.min_loss and not self.args.val_only:
-            self.min_loss = new_loss
-            self.min_iter = i_iter
-            self.patience_count = 0
-            print(f"Storing new best model at iteration {i_iter}")
-            if self.logger_fid:
-                print(f"Storing new best model at iteration {i_iter}", file=self.logger_fid)
-            torch.save(
-                self.model.state_dict(),
-                osp.join(
-                    self.args.snapshot_dir,
-                    'G-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+        if not self.args.val_only:
+            if self.last_loss is not None and new_loss > self.last_loss:
+                self.patience_count += self.args.save_pred_every
+                print(f"Early stopping count: {self.patience_count} of {self.args.num_steps_stop}")
+            else:
+                self.patience_count = 0
+                print(f"Storing new best model at iteration {i_iter}")
+                if self.logger_fid:
+                    print(f"Storing new best model at iteration {i_iter}", file=self.logger_fid)
+                torch.save(
+                    self.model.state_dict(),
+                    osp.join(
+                        self.args.snapshot_dir,
+                        'G-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                    )
                 )
-            )
-            torch.save(
-                self.model_D1.state_dict(),
-                osp.join(
-                    self.args.snapshot_dir,
-                    'D1-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                torch.save(
+                    self.model_D1.state_dict(),
+                    osp.join(
+                        self.args.snapshot_dir,
+                        'D1-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                    )
                 )
-            )
-            torch.save(
-                self.model_D2.state_dict(),
-                osp.join(
-                    self.args.snapshot_dir,
-                    'D2-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                torch.save(
+                    self.model_D2.state_dict(),
+                    osp.join(
+                        self.args.snapshot_dir,
+                        'D2-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                    )
                 )
-            )
-            torch.save(
-                self.model_wD.state_dict(),
-                osp.join(
-                    self.args.snapshot_dir,
-                    'wD-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                torch.save(
+                    self.model_wD.state_dict(),
+                    osp.join(
+                        self.args.snapshot_dir,
+                        'wD-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
+                    )
                 )
-            )
-        elif new_loss >= self.min_loss and not self.args.val_only:
-            self.patience_count += self.args.save_pred_every
-            print(f"Early stopping count: {self.patience_count} of {self.args.num_steps_stop}")
 
-        return new_loss
+            self.last_loss = new_loss
+
+        return self.last_loss
 
 
     # evaluation
@@ -471,6 +503,10 @@ class Trainer:
 
             # compute IoU
             output = np.asarray(np.argmax(output, axis=2), dtype=np.uint8)
+            # apply erosion
+            kernel = np.ones((6,6), np.uint8)
+            label = cv2.erode(label.astype(np.uint8), kernel, iterations=1)
+            output = cv2.erode(output.astype(np.uint8), kernel, iterations=1)
             hist = util.compute_iou(output.copy(), label, num_classes)
 
             # save segmentation results
@@ -542,44 +578,5 @@ class Trainer:
         else:
             new_pred = crack_IoU  ###
             # new_pred = mIoU
-
-        # if new_pred > self.best_pred and not self.args.val_only:
-        #     self.best_pred = new_pred
-        #     self.best_iter = i_iter
-        #     self.patience_count = 0
-        #     print(f"Storing new best model at iteration {i_iter}")
-        #     if self.logger_fid:
-        #         print(f"Storing new best model at iteration {i_iter}", file=self.logger_fid)
-        #     torch.save(
-        #         self.model.state_dict(),
-        #         osp.join(
-        #             self.args.snapshot_dir,
-        #             'G-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
-        #         )
-        #     )
-        #     torch.save(
-        #         self.model_D1.state_dict(),
-        #         osp.join(
-        #             self.args.snapshot_dir,
-        #             'D1-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
-        #         )
-        #     )
-        #     torch.save(
-        #         self.model_D2.state_dict(),
-        #         osp.join(
-        #             self.args.snapshot_dir,
-        #             'D2-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
-        #         )
-        #     )
-        #     torch.save(
-        #         self.model_wD.state_dict(),
-        #         osp.join(
-        #             self.args.snapshot_dir,
-        #             'wD-%s-%s.pth' % (self.args.dataset_source, self.args.dataset_target)
-        #         )
-        #     )
-        # elif new_pred <= self.best_pred and not self.args.val_only:
-        #     self.patience_count += self.args.save_pred_every
-        #     print(f"Early stopping count: {self.patience_count} of {self.args.num_steps_stop}")
 
         return new_pred
