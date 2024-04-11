@@ -63,7 +63,7 @@ class CRACK500TSegmentation(data.Dataset):
                 self.point_labels.append(np.array(choose_idx))
             # self.point_labels = list(self.point_labels)
 
-        if max_iters is not None:
+        if max_iters is not None and self.split == 'train':
             self.point_labels = \
                 self.point_labels * int(np.ceil(float(max_iters) / len(self.img_ids)))
             self.img_ids = self.img_ids * int(np.ceil(float(max_iters) / len(self.img_ids)))
@@ -120,6 +120,7 @@ class CRACK500TSegmentation(data.Dataset):
                 elif flip_type == 'horizontal':
                     flip_type = 'ho_ver'           
 
+        # print(name, flip_type)
         point_label_list = []
         if self.use_points:
             point_label_list = self.point_labels[index]

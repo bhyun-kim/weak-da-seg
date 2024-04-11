@@ -36,7 +36,8 @@ class GAPSSSegmentation(data.Dataset):
         # load image list
         list_path = osp.join(self.data_root, '%s_list/%s.txt' % (self.dataset, self.split))
         self.img_ids = [i_id.strip() for i_id in open(list_path)]
-        self.img_ids = self.img_ids * int(np.ceil(float(max_iters) / len(self.img_ids)))
+        if self.split == 'train':
+            self.img_ids = self.img_ids * int(np.ceil(float(max_iters) / len(self.img_ids)))
 
         # map label IDs to the format of Cityscapes
         self.id_to_trainid = {0: 0, 1: 1}
