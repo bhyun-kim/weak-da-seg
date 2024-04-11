@@ -63,7 +63,7 @@ class RissbilderTSegmentation(data.Dataset):
                 self.point_labels.append(np.array(choose_idx))
             # self.point_labels = list(self.point_labels)
 
-        if max_iters is not None:
+        if max_iters is not None and self.split == 'train':
             self.point_labels = \
                 self.point_labels * int(np.ceil(float(max_iters) / len(self.img_ids)))
             self.img_ids = self.img_ids * int(np.ceil(float(max_iters) / len(self.img_ids)))
