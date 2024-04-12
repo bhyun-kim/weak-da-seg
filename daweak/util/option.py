@@ -47,9 +47,13 @@ class Options:
         # training hyper params
         parser.add_argument("--batch-size", type=int, default=1,
                             help="Number of images sent to the network in one step.")
-        parser.add_argument("--num-steps", type=int, default=250000,
+        parser.add_argument("--num-steps-1", type=int, default=250000,
                             help="Number of training steps.")
-        parser.add_argument("--num-steps-stop", type=int, default=150000,
+        parser.add_argument("--num-steps-stop-1", type=int, default=150000,
+                            help="Number of training steps for early stopping.")
+        parser.add_argument("--num-steps-2", type=int, default=250000,
+                            help="Number of training steps.")
+        parser.add_argument("--num-steps-stop-2", type=int, default=150000,
                             help="Number of training steps for early stopping.")
         parser.add_argument("--seed", type=int, default=1,
                             help="Random seed to have reproducible results.")

@@ -150,7 +150,7 @@ class Trainer:
         self.target_th = load_threshold(args.dataset_target, args.num_classes)
 
         # dataset
-        data_kwargs = {'data_root': args.data_root, 'max_iters': args.num_steps * args.batch_size}
+        data_kwargs = {'data_root': args.data_root, 'max_iters': args.num_steps_2 * args.batch_size}
         if not args.val_only:
             trainset_source = get_dataset(
                 args.dataset_source, path=args.data_path_source, split=args.train_split,
@@ -273,13 +273,13 @@ class Trainer:
         return base_lr * ((1 - float(iter) / max_iter) ** (power))
 
     def adjust_learning_rate(self, optimizer, i_iter):
-        lr = self.lr_poly(self.args.learning_rate, i_iter, self.args.num_steps, self.args.power)
+        lr = self.lr_poly(self.args.learning_rate, i_iter, self.args.num_steps_2, self.args.power)
         optimizer.param_groups[0]['lr'] = lr
         if len(optimizer.param_groups) > 1:
             optimizer.param_groups[1]['lr'] = lr * 10
 
     def adjust_learning_rate_D(self, optimizer, i_iter):
-        lr = self.lr_poly(self.args.learning_rate_D, i_iter, self.args.num_steps, self.args.power)
+        lr = self.lr_poly(self.args.learning_rate_D, i_iter, self.args.num_steps_2, self.args.power)
         optimizer.param_groups[0]['lr'] = lr
         if len(optimizer.param_groups) > 1:
             optimizer.param_groups[1]['lr'] = lr * 10
@@ -423,12 +423,13 @@ class Trainer:
                         )                   
 
                     total_loss_val += self.args.lambda_adv_target2 * loss_adv_target2.item()  # 5
+                    print('adv loss: ', self.args.lambda_adv_target2 * loss_adv_target2.item())
 
                 total_batches += 1
 
             avg_loss_val = total_loss_val / total_batches    
 
-        loss_txt = ('iter = {0:8d}/{1:8d}, val_loss = {2:.3f}'.format(i_iter, self.args.num_steps, avg_loss_val))
+        loss_txt = ('iter = {0:8d}/{1:8d}, val_loss = {2:.3f}'.format(i_iter, self.args.num_steps_2, avg_loss_val))
         print(loss_txt)
         if self.logger_fid:
             print(loss_txt, file=self.logger_fid, flush=True)
@@ -438,7 +439,7 @@ class Trainer:
         if not self.args.val_only:
             if self.last_loss is not None and new_loss > self.last_loss:
                 self.patience_count += self.args.save_pred_every
-                print(f"Early stopping count: {self.patience_count} of {self.args.num_steps_stop}")
+                print(f"Early stopping count: {self.patience_count}")
             else:
                 self.patience_count = 0
                 print(f"Storing new best model at iteration {i_iter}")
@@ -504,9 +505,9 @@ class Trainer:
             # compute IoU
             output = np.asarray(np.argmax(output, axis=2), dtype=np.uint8)
             # apply erosion
-            kernel = np.ones((6,6), np.uint8)
-            label = cv2.erode(label.astype(np.uint8), kernel, iterations=1)
-            output = cv2.erode(output.astype(np.uint8), kernel, iterations=1)
+            # kernel = np.ones((6,6), np.uint8)
+            # label = cv2.erode(label.astype(np.uint8), kernel, iterations=1)
+            # output = cv2.erode(output.astype(np.uint8), kernel, iterations=1)
             hist = util.compute_iou(output.copy(), label, num_classes)
 
             # save segmentation results

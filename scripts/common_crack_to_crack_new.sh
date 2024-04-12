@@ -4,40 +4,45 @@
 model="deeplab"
 
 # dataset
-source="crack500_s"
-target="crack500_t"
-# gaps_s, gaps_t, road_s, road_t
+source="cfd_s"
+target="rissbilder_t"
+# gaps_s, gaps_t, cfd_s, cfd_t, deepcrack_s, deepcrack_t, cracktree200_s, cracktree200_t
 # crack500_s, crack500_t, rissbilder_s, rissbilder_t
-# generalcon_s, generalcon_t
+# kaggle_s, kaggle_t
+# yang_s, yang_t
+# cfd_s, cfd_t, ..., rissbilder_s, rissbilder_t
 
-if [ "$source" = "crack500_s" ]
+if [ "$source" = "cfd_s" ]
 then
-    source_path="/home/user/WindowsShare/05. Data/00. Benchmarks/27. crackseg9k/train_val_test"
+    source_path="/home/user/WindowsShare/05. Data/02. Training&Test/021. Korean_Express_Corporation/Fine Labeling (2021-2022)/train_val_test"
 fi
 # /home/user/WindowsShare/05. Data/00. Benchmarks/22. KhanhhaCrack/04. convert2cityscapes
-# /home/user/WindowsShare/05. Data/00. Benchmarks/27. crackseg9k/train_val_test
-# /home/user/WindowsShare/05. Data/02. Training&Test/013. General Concrete Damage/01. Cityscapes/v_bh
+# /home/user/WindowsShare/05. Data/00. Benchmarks/27. crackseg9k/02.convert2cityscapes
+# /home/user/WindowsShare/05. Data/00. Benchmarks/23. KaggleCrack/03. Cityscapes Dataset
+# /home/user/WindowsShare/05. Data/00. Benchmarks/26. Crack_Yang/02.convert2cityscapes
+# /home/user/WindowsShare/05. Data/00. Benchmarks/33. DA/00.train_val_test/001.cfd, 002.gaps, 003.cracktree200, 004.crack500, 005.kaggle, 006.yang, 007.rissbilder
 
-if [ "$target" = "crack500_t" ]
+if [ "$target" = "rissbilder_t" ]
 then
-    target_path="/home/user/WindowsShare/05. Data/00. Benchmarks/27. crackseg9k/train_val_test"
+    target_path="/home/user/WindowsShare/05. Data/02. Training&Test/021. Korean_Express_Corporation/Fine Labeling (2021-2022)/train_val_test"
 fi
 
 # 448,448
 # 400,400
-# 1024,1024
+# 1008,756
+# 306,306
 
-if [ "$source" = "crack500_s" ]
+if [ "$source" = "cfd_s" ]
 then
-    source_size="400,400"
+    source_size="448,448"
 fi
 
-if [ "$target" = "crack500_t" ]
+if [ "$target" = "rissbilder_t" ]
 then
     target_size="400,400"
 fi
 
-if [ "$source" = "crack500_s" ]
+if [ "$source" = "cfd_s" ]
 then
     num_classes=2
 fi
@@ -46,23 +51,27 @@ train_split="train"
 val_split="val"
 test_split="test"
 
+# 84, 417, 159, 1205, 257, 647, 2189
+
 # parameters
 batch_size=1
-num_steps=200000
-num_steps_stop=100000
+num_steps_1=109450  # num_of_train_data x 50
+num_steps_2=656700  # num_of_train_data x 300 ~ 500
+num_steps_stop_1=10945  # num_of_train_data x 5
+num_steps_stop_2=8756  # num_of_train_data x 4
 
 lambda_seg=0.0
 lambda_adv1=0.0
 lambda_adv2=0.001  # 0.001
-lambda_weak2=0.01  # 0.01 for pseudo, 0.2 for oracle
+lambda_weak2=0.2  # 0.01 for pseudo, 0.2 for oracle
 lambda_weak_cwadv2=0.001  # 0.001
 
 lr=2.5e-4
 # lr=0.00001
 lr_d=1e-4
 
-save_step=1000
-print_step=100
+save_step=2189  # num_of_train_data
+print_step=2189  # num_of_train_data
 pweak_th=0.2
 
 #

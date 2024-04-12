@@ -15,18 +15,18 @@ class TrainerWeakda(Trainer):
 
     def training(self):
         print('Starting Training')
-        print('Total Iterations:', self.args.num_steps)
+        print('Total Iterations:', self.args.num_steps_2)
         print('Exp = {}'.format(self.args.snapshot_dir))
         if self.logger_fid:
             print('Starting Training', file=self.logger_fid)
-            print('Total Iterations:', self.args.num_steps, file=self.logger_fid)
+            print('Total Iterations:', self.args.num_steps_2, file=self.logger_fid)
             print('Exp = {}'.format(self.args.snapshot_dir), file=self.logger_fid)
         eps = 1e-7
 
         iter_source = enumerate(self.trainloader_source)
         iter_target = enumerate(self.trainloader_target)
 
-        for i_iter in range(self.args.num_steps):
+        for i_iter in range(self.args.num_steps_2):
 
             loss_seg_value1 = 0
             loss_adv_target_value1 = 0
@@ -253,12 +253,12 @@ class TrainerWeakda(Trainer):
                     self.optimizer_wD.step()
 
             # print loss
-            if i_iter % self.args.print_loss_every == 0 and i_iter < self.args.num_steps - 1:  ###
+            if i_iter % self.args.print_loss_every == 0 and i_iter < self.args.num_steps_2 - 1:  ###
                 loss_txt = (
                     'iter = {0:8d}/{1:8d}, seg1 = {2:.3f} seg2 = {3:.3f} adv1 = {4:.3f}, '
                     'adv2 = {5:.3f}, D1 = {6:.3f} D2 = {7:.3f}, weak = {8:.3f}, wadv2 = {9:.3f}, '
                     'wD2 = {10:.3f}, pl = {11:.3f}'.format(
-                        i_iter, self.args.num_steps, loss_seg_value1, loss_seg_value2,
+                        i_iter, self.args.num_steps_2, loss_seg_value1, loss_seg_value2,
                         loss_adv_target_value1, loss_adv_target_value2, loss_D_value1,
                         loss_D_value2, loss_weak_target2, loss_weak_cwadv_value2,
                         loss_weak_D_value2, loss_point_value)
@@ -269,8 +269,7 @@ class TrainerWeakda(Trainer):
 
             # test during training
             if self.args.val:
-                if (i_iter % self.args.save_pred_every == 0 and i_iter != 0) \
-                   and i_iter < self.args.num_steps:  ###
+                if i_iter % self.args.save_pred_every == 0 and i_iter > 0 and i_iter <= self.args.num_steps_1:
                     self.validation(i_iter)
                     self.is_less = True
 
@@ -286,17 +285,39 @@ class TrainerWeakda(Trainer):
                                 file=self.logger_fid,
                             )
 
-                    if self.patience_count >= self.args.num_steps_stop:  ###
-                        print(f"Early stopping at iteration {i_iter}. No improvement for {self.args.num_steps_stop} iterations.")
+                    if self.patience_count >= self.args.num_steps_stop_1:  ###
+                        print(f"Early stopping at iteration {i_iter}. No improvement for {self.args.num_steps_stop_1} iterations.")
                         break
                     
                     self.model.train()
 
-            if i_iter >= self.args.num_steps:  ###
-                print(f"Stop training at {self.args.num_steps} ('num-steps') iters")  ###
+                if i_iter % self.args.save_pred_every == 0 and i_iter > self.args.num_steps_1 and i_iter <= self.args.num_steps_2:
+                    self.validation(i_iter)
+                    self.is_less = True
+
+                    if self.is_less:
+                        print(
+                            'Current loss at iter %d: %f' %
+                            (i_iter, self.last_loss)
+                        )
+                        if self.logger_fid:
+                            print(
+                                'Current loss at iter %d: %f' %
+                                (i_iter, self.last_loss),
+                                file=self.logger_fid,
+                            )
+
+                    if self.patience_count >= self.args.num_steps_stop_2:  ###
+                        print(f"Early stopping at iteration {i_iter}. No improvement for {self.args.num_steps_stop_2} iterations.")
+                        break
+                    
+                    self.model.train()
+
+            if i_iter > self.args.num_steps_2:  ###
+                print(f"Stop training at {self.args.num_steps_2} ('num-steps') iters")  ###
                 if self.logger_fid:
                     print(
-                        f"Stop training at {self.args.num_steps} ('num-steps') iters",  ###
+                        f"Stop training at {self.args.num_steps_2} ('num-steps') iters",  ###
                         file=self.logger_fid
                     )
                 break
